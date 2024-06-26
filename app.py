@@ -37,7 +37,6 @@ def get_vector_store(text_chunks):
 
 
 def get_conversational_chain():
-
     prompt_template = """
     Please ask a question based on the provided material.\n\n
     Context:\n {context}?\n
@@ -89,13 +88,22 @@ def main():
         if st.button("Submit & Process"):
             if pdf_docs:
                 with st.spinner("Processing..."):
-                    raw_text = get_pdf_text(pdf_docs)
-                    text_chunks = get_text_chunks(raw_text)
-                    get_vector_store(text_chunks)
-                    st.success("Processing completed.")
+                    try:
+                        raw_text = get_pdf_text(pdf_docs)
+                        text_chunks = get_text_chunks(raw_text)
+                        get_vector_store(text_chunks)
+                        st.success("Processing completed.")
+                    except Exception as e:
+                        st.error(f"Error processing PDFs: {e}")
             else:
                 st.warning("Please upload at least one PDF document.")
 
 
 if __name__ == "__main__":
     main()
+
+
+
+# Footer 
+st.markdown("---") 
+st.markdown("Designed by Christley with ❤️")
