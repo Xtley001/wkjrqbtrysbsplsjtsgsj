@@ -105,5 +105,4 @@ if __name__ == "__main__":
 
 
 # Footer 
-st.markdown("---") 
-st.markdown("Designed by Christley with ❤️")
+st.markdown("Built by Christley with ❤️")
