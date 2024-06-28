@@ -54,7 +54,7 @@ def get_conversational_chain():
 def user_input(user_question):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
-    # Set allow_dangerous_deserialization=True only if you trust the source of 'faiss_index'
+    # Set allow_dangerous_deserialization=True since the source of 'faiss_index' is trusted
     new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
     docs = new_db.similarity_search(user_question)
 
@@ -66,7 +66,7 @@ def user_input(user_question):
 
 
 def main():
-    st.set_page_config("Interactify")
+    st.set_page_config(page_title="Interactify")
     st.header("Interactify")
 
     st.markdown(
@@ -103,6 +103,6 @@ if __name__ == "__main__":
     main()
 
 
-
-# Footer 
+# Footer
 st.markdown("Built by Christley with ❤️")
+
