@@ -1,107 +1,253 @@
 import streamlit as st
-from PyPDF2 import PdfReader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-import os
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import google.generativeai as genai
-from langchain.vectorstores import FAISS
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.chains.question_answering import load_qa_chain
-from langchain.prompts import PromptTemplate
+import os
+import PyPDF2 as pdf
+from docx import Document
 from dotenv import load_dotenv
+import json
 
+# Load environment variables
 load_dotenv()
-os.getenv("GOOGLE_API_KEY")
+
+# Configure Gemini API
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
+# Function to get response from Gemini API
+def get_gemini_response(input_text):
+    model = genai.GenerativeModel('gemini-pro')
+    try:
+        response = model.generate_content(input_text)
+        if response and response.text:
+            return response.text
+        else:
+            st.error("Received an empty response from the model.")
+            return "{}"  # Return empty JSON
+    except Exception as e:
+        st.error(f"Error while getting response from API: {str(e)}")
+        return "{}"  # Return empty JSON
 
-def get_pdf_text(pdf_docs):
-    text = ""
-    for pdf in pdf_docs:
-        pdf_reader = PdfReader(pdf)
-        for page in pdf_reader.pages:
-            text += page.extract_text()
+# Function to extract text from uploaded PDF file
+def input_pdf_text(uploaded_file):
+    reader = pdf.PdfReader(uploaded_file)
+    text = []
+    for page_num in range(len(reader.pages)):
+        page = reader.pages[page_num]
+        text.append(page.extract_text())
     return text
 
+# Function to extract text from uploaded Word document
+def input_word_text(uploaded_file):
+    doc = Document(uploaded_file)
+    text = []
+    for para in doc.paragraphs:
+        text.append(para.text)
+    return text
 
-def get_text_chunks(text):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
-    chunks = text_splitter.split_text(text)
+# Function to split text into manageable chunks
+def split_text(text, max_chunk_size=2000):
+    """Split text into chunks with a maximum size."""
+    chunks = []
+    while len(text) > max_chunk_size:
+        chunk = text[:max_chunk_size]
+        text = text[max_chunk_size:]
+        chunks.append(chunk)
+    chunks.append(text)
     return chunks
 
-
-def get_vector_store(text_chunks):
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
-    vector_store.save_local("faiss_index")
-
-
-def get_conversational_chain():
-    prompt_template = """
-    Please ask a question based on the provided material.\n\n
-    Context:\n {context}?\n
-    Question: \n{question}\n
-    """
-
-    model = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3)
-
-    prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-    chain = load_qa_chain(model, chain_type="stuff", prompt=prompt)
-
-    return chain
-
-
-def user_input(user_question):
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+# Prompt Template for generating explanations, examples, and mini tests
+input_prompts = {
+    "Mathematics": """
+    You are an expert in mathematics. Your task is to explain the content on the given page, provide a relevant example, and create a mini test with solutions.
     
-    new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
-    docs = new_db.similarity_search(user_question)
+    Page Content: {page_content}
+    
+    I want the response in the following structured format:
+    {{"Explanation": "", "Example": "", "Mini Test": "", "Test Solution": ""}}
+    """,
+    "Statistics": """
+    You are an expert in statistics. Your task is to explain the content on the given page, provide a relevant example, and create a mini test with solutions.
+    
+    Page Content: {page_content}
+    
+    I want the response in the following structured format:
+    {{"Explanation": "", "Example": "", "Mini Test": "", "Test Solution": ""}}
+    """,
+    "Computer Science": """
+    You are an expert in computer science. Your task is to explain the content on the given page, provide a relevant example, and create a mini test with solutions.
+    
+    Page Content: {page_content}
+    
+    I want the response in the following structured format:
+    {{"Explanation": "", "Example": "", "Mini Test": "", "Test Solution": ""}}
+    """
+}
 
-    chain = get_conversational_chain()
+# Streamlit App
+st.set_page_config(page_title="Interactify")
+st.title("Interactify")
 
-    response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
+# Signup and Login forms
+if "user" not in st.session_state:
+    st.session_state.user = None
 
-    st.write("Reply:", response["output_text"])
+if st.session_state.user:
+    st.sidebar.write(f"Logged in as: {st.session_state.user}")
+    if st.sidebar.button("Logout"):
+        st.session_state.user = None
+else:
+    login_choice = st.sidebar.selectbox("Login or Signup", ["Login", "Signup"])
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+    
+    if login_choice == "Signup":
+        if st.sidebar.button("Signup"):
+            # Here you would add logic to save the new user's credentials securely
+            st.session_state.user = username
+            st.sidebar.success("Signup successful!")
+    else:
+        if st.sidebar.button("Login"):
+            # Here you would add logic to verify the user's credentials
+            st.session_state.user = username
+            st.sidebar.success("Login successful!")
 
+if not st.session_state.user:
+    st.stop()
 
-def main():
-    st.set_page_config(page_title="Interactify")
-    st.header("Interactify")
+# Dropdown for subject selection
+subject = st.selectbox("Select Subject", ["Mathematics", "Statistics", "Computer Science"])
 
-    st.markdown(
-        """
-        #### Welcome to Interactify!
+# File uploader for slides (PDF, Word, or text) input
+uploaded_file = st.file_uploader("Upload Your Document (PDF, DOCX, TXT)...", type=["pdf", "docx", "txt"])
 
-        Use the menu on the sidebar to upload your study notes (PDF format), and then ask questions based on the provided material.
-        """
-    )
+# Text area for user question
+user_question = st.text_area("Type your question about the document content:")
 
-    user_question = st.text_input("Ask a question based on your study material")
+# Text input for page range
+page_range_input = st.text_input("Enter page ranges (e.g., 78-79):")
 
-    if user_question:
-        user_input(user_question)
+# Initialize session state for history
+if 'history' not in st.session_state:
+    st.session_state.history = []
 
-    with st.sidebar:
-        st.title("Menu:")
-        pdf_docs = st.file_uploader("Upload your study notes (PDF)", accept_multiple_files=True)
-        if st.button("Submit & Process"):
-            if pdf_docs:
-                with st.spinner("Processing..."):
-                    try:
-                        raw_text = get_pdf_text(pdf_docs)
-                        text_chunks = get_text_chunks(raw_text)
-                        get_vector_store(text_chunks)
-                        st.success("Processing completed.")
-                    except Exception as e:
-                        st.error(f"Error processing PDFs: {e}")
+# Submit button for processing the document
+submit = st.button("Submit")
+
+if submit:
+    if uploaded_file:
+        try:
+            # Extract text from the uploaded file
+            if uploaded_file.type == "application/pdf":
+                document_text = input_pdf_text(uploaded_file)
+            elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                document_text = input_word_text(uploaded_file)
+            elif uploaded_file.type == "text/plain":
+                document_text = uploaded_file.read().decode("utf-8").split('\n')
             else:
-                st.warning("Please upload at least one PDF document.")
+                st.error("Unsupported file type!")
+                st.stop()
 
+            # Process page ranges
+            page_ranges = []
+            if page_range_input:
+                try:
+                    ranges = page_range_input.split(',')
+                    for r in ranges:
+                        start, end = map(int, r.split('-'))
+                        page_ranges.append(range(start - 1, end))
+                except ValueError:
+                    st.error("Invalid page range format! Use the format 'start-end'.")
+                    st.stop()
+            else:
+                page_ranges = [range(len(document_text))]
 
-if __name__ == "__main__":
-    main()
+            # Process selected pages
+            generated_content = []
+            st.markdown("### Generated Content:")
+            
+            for range_set in page_ranges:
+                for page_num in range_set:
+                    if page_num < len(document_text):
+                        st.markdown(f"#### Page {page_num + 1}")
+                        page_content = document_text[page_num]
 
+                        # Prepare prompt with extracted page text
+                        input_prompt = input_prompts[subject]
+                        input_prompt_filled = input_prompt.format(page_content=page_content)
+                        
+                        # Get response from Gemini API
+                        response = get_gemini_response(input_prompt_filled)
+                        
+                        # Display raw response for debugging
+                        st.markdown("**Raw Response:**")
+                        st.write(response)
+                        
+                        try:
+                            # Parse response
+                            response_json = json.loads(response)
+                            
+                            # Display and collect Explanation, Example, Mini Test, and Test Solution
+                            explanation = response_json.get("Explanation", "No explanation available.")
+                            example = response_json.get("Example", "No example available.")
+                            mini_test = response_json.get("Mini Test", "No mini test available.")
+                            test_solution = response_json.get("Test Solution", "No test solution available.")
+                            
+                            st.markdown("**Explanation:**")
+                            st.write(explanation)
+                            
+                            st.markdown("**Example:**")
+                            st.write(example)
+                            
+                            st.markdown("**Mini Test:**")
+                            st.write(mini_test)
+                            
+                            st.markdown("**Test Solution:**")
+                            st.write(test_solution)
+                            
+                            # Collect generated content in JSON format
+                            page_content_json = {
+                                "Page": page_num + 1,
+                                "Explanation": explanation,
+                                "Example": example,
+                                "Mini Test": mini_test,
+                                "Test Solution": test_solution
+                            }
+                            generated_content.append(page_content_json)
+                        except json.JSONDecodeError:
+                            st.error("Failed to decode JSON response from the model.")
+                        
+                    else:
+                        st.warning(f"Page {page_num + 1} is out of range.")
+            
+            # Add generated content to history
+            st.session_state.history.append(generated_content)
+            
+            # Provide option to copy generated content
+            st.markdown("### Copy Generated Content")
+            generated_content_str = json.dumps(generated_content, indent=4)
+            st.code(generated_content_str)
+            if st.button("Copy to Clipboard"):
+                st.experimental_set_query_params(text=generated_content_str)
+                st.success("Content copied to clipboard!")
+
+            # Process user question
+            if user_question:
+                question_prompt = f"Based on the content of the document, answer the following question:\n{user_question}"
+                response = get_gemini_response(question_prompt)
+                st.markdown("### Answer to Your Question:")
+                st.write(response)
+                
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+    else:
+        st.warning("Please upload your document.")
+
+# Display history
+if st.session_state.history:
+    st.markdown("### History")
+    for i, content in enumerate(st.session_state.history, start=1):
+        with st.expander(f"History {i}"):
+            st.json(content)
 
 # Footer
-st.markdown("Built by Christley with ❤️")
-
+st.markdown("---")
+st.markdown("© 2024 by Christley")
