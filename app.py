@@ -86,33 +86,6 @@ input_prompts = {
 st.set_page_config(page_title="Interactify")
 st.title("Interactify")
 
-# Signup and Login forms
-if "user" not in st.session_state:
-    st.session_state.user = None
-
-if st.session_state.user:
-    st.sidebar.write(f"Logged in as: {st.session_state.user}")
-    if st.sidebar.button("Logout"):
-        st.session_state.user = None
-else:
-    login_choice = st.sidebar.selectbox("Login or Signup", ["Login", "Signup"])
-    username = st.sidebar.text_input("Username")
-    password = st.sidebar.text_input("Password", type="password")
-    
-    if login_choice == "Signup":
-        if st.sidebar.button("Signup"):
-            # Here you would add logic to save the new user's credentials securely
-            st.session_state.user = username
-            st.sidebar.success("Signup successful!")
-    else:
-        if st.sidebar.button("Login"):
-            # Here you would add logic to verify the user's credentials
-            st.session_state.user = username
-            st.sidebar.success("Login successful!")
-
-if not st.session_state.user:
-    st.stop()
-
 # Dropdown for subject selection
 subject = st.selectbox("Select Subject", ["Mathematics", "Statistics", "Computer Science"])
 
