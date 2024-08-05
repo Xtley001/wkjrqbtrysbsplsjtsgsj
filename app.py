@@ -3,6 +3,7 @@ import google.generativeai as genai
 import os
 import PyPDF2 as pdf
 from docx import Document
+from pptx import Presentation
 from dotenv import load_dotenv
 import json
 
@@ -41,6 +42,16 @@ def input_word_text(uploaded_file):
     text = []
     for para in doc.paragraphs:
         text.append(para.text)
+    return text
+
+# Function to extract text from uploaded PPT file
+def input_ppt_text(uploaded_file):
+    presentation = Presentation(uploaded_file)
+    text = []
+    for slide in presentation.slides:
+        for shape in slide.shapes:
+            if hasattr(shape, "text"):
+                text.append(shape.text)
     return text
 
 # Function to split text into manageable chunks
@@ -89,8 +100,8 @@ st.title("Interactify")
 # Dropdown for subject selection
 subject = st.selectbox("Select Subject", ["Mathematics", "Statistics", "Computer Science"])
 
-# File uploader for slides (PDF, Word, or text) input
-uploaded_file = st.file_uploader("Upload Your Document (PDF, DOCX, TXT)...", type=["pdf", "docx", "txt"])
+# File uploader for slides (PDF, Word, PPT, or text) input
+uploaded_file = st.file_uploader("Upload Your Document (PDF, DOCX, PPTX, TXT)...", type=["pdf", "docx", "pptx", "txt"])
 
 # Text area for user question
 user_question = st.text_area("Type your question about the document content:")
@@ -113,6 +124,8 @@ if submit:
                 document_text = input_pdf_text(uploaded_file)
             elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
                 document_text = input_word_text(uploaded_file)
+            elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+                document_text = input_ppt_text(uploaded_file)
             elif uploaded_file.type == "text/plain":
                 document_text = uploaded_file.read().decode("utf-8").split('\n')
             else:
@@ -224,3 +237,4 @@ if st.session_state.history:
 # Footer
 st.markdown("---")
 st.markdown("© 2024 by Christley")
+
