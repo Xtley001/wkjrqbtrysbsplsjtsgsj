@@ -2,6 +2,7 @@ streamlit
 google-generativeai
 PyPDF2
 python-docx
+python-pptx
 python-dotenv
 plotly
 pandas
