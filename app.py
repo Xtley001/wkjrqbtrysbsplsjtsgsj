@@ -1,11 +1,14 @@
 import streamlit as st
 import google.generativeai as genai
 import os
-import PyPDF2 as pdf
 from docx import Document
-from pptx import Presentation
+from docx.shared import Pt, RGBColor
+from io import BytesIO
+import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 import json
+import PyPDF2 as pdf
+from pptx import Presentation
 
 # Load environment variables
 load_dotenv()
@@ -22,10 +25,10 @@ def get_gemini_response(input_text):
             return response.text
         else:
             st.error("Received an empty response from the model.")
-            return "{}"  # Return empty JSON
+            return "{}"
     except Exception as e:
         st.error(f"Error while getting response from API: {str(e)}")
-        return "{}"  # Return empty JSON
+        return "{}"
 
 # Function to extract text from uploaded PDF file
 def input_pdf_text(uploaded_file):
@@ -56,7 +59,6 @@ def input_ppt_text(uploaded_file):
 
 # Function to split text into manageable chunks
 def split_text(text, max_chunk_size=2000):
-    """Split text into chunks with a maximum size."""
     chunks = []
     while len(text) > max_chunk_size:
         chunk = text[:max_chunk_size]
@@ -65,31 +67,68 @@ def split_text(text, max_chunk_size=2000):
     chunks.append(text)
     return chunks
 
-# Prompt Template for generating explanations, examples, and mini tests
+# Function to create an image for LaTeX formula
+def create_formula_image(formula):
+    plt.text(0.5, 0.5, f"${formula}$", fontsize=15, ha='center', va='center')
+    plt.axis('off')
+
+    image_stream = BytesIO()
+    plt.savefig(image_stream, format='png', bbox_inches='tight', transparent=True)
+    plt.close()
+    image_stream.seek(0)
+    return image_stream
+
+# Function to save generated content with formula and formatted text to DOCX
+def save_docx_with_formulas(generated_content):
+    doc = Document()
+    for content in generated_content:
+        doc.add_heading(f"Page {content['Page']}", level=1)
+
+        # Add Explanation with font settings
+        explanation_paragraph = doc.add_paragraph(f"Explanation: {content['Explanation']}")
+        explanation_paragraph.runs[0].font.size = Pt(12)
+        explanation_paragraph.runs[0].font.name = 'Arial'
+        explanation_paragraph.runs[0].font.color.rgb = RGBColor(0, 0, 0)
+
+        # Add Example
+        doc.add_paragraph(f"Example: {content['Example']}")
+
+        # Add Formula (as an image)
+        formula_image = create_formula_image(content['Mini Test'])
+        doc.add_paragraph("Mini Test (with formula):")
+        doc.add_picture(formula_image, width=Pt(300))
+
+        # Add Test Solution
+        doc.add_paragraph(f"Test Solution: {content['Test Solution']}")
+
+    file_stream = BytesIO()
+    doc.save(file_stream)
+    file_stream.seek(0)
+    
+    return file_stream
+
+# Expanded prompts
 input_prompts = {
     "Mathematics": """
-    You are an expert in mathematics. Your task is to explain the content on the given page, provide a relevant example, and create a mini test with solutions.
-    
+    You are an expert in mathematics. Your task is to explain the content on the given page in a detailed and comprehensive manner.
+    Provide a relevant and contextual example to illustrate the concept, ensuring that your explanation and example are clear for someone without advanced knowledge.
+    Lastly, create a mini-test related to the page content with at least two problems. Be sure to provide detailed solutions.
+    Your response should be no less than 300-500 words.
     Page Content: {page_content}
-    
-    I want the response in the following structured format:
-    {{"Explanation": "", "Example": "", "Mini Test": "", "Test Solution": ""}}
     """,
     "Statistics": """
-    You are an expert in statistics. Your task is to explain the content on the given page, provide a relevant example, and create a mini test with solutions.
-    
+    You are an expert in statistics. Your task is to explain the content on the given page in a thorough and comprehensive manner.
+    Break down statistical terms and concepts in simple language, and provide a real-world example.
+    Additionally, create a mini-test with at least two problems and detailed solutions.
+    Your response should be no less than 300-500 words.
     Page Content: {page_content}
-    
-    I want the response in the following structured format:
-    {{"Explanation": "", "Example": "", "Mini Test": "", "Test Solution": ""}}
     """,
     "Computer Science": """
-    You are an expert in computer science. Your task is to explain the content on the given page, provide a relevant example, and create a mini test with solutions.
-    
+    You are an expert in computer science. Your task is to explain the content on the given page in a detailed manner.
+    Provide a practical example, and create a mini-test with at least two questions to test the reader's understanding.
+    Include step-by-step solutions.
+    Your response should be no less than 300-500 words.
     Page Content: {page_content}
-    
-    I want the response in the following structured format:
-    {{"Explanation": "", "Example": "", "Mini Test": "", "Test Solution": ""}}
     """
 }
 
@@ -100,18 +139,11 @@ st.title("Interactify")
 # Dropdown for subject selection
 subject = st.selectbox("Select Subject", ["Mathematics", "Statistics", "Computer Science"])
 
-# File uploader for slides (PDF, Word, PPT, or text) input
+# File uploader
 uploaded_file = st.file_uploader("Upload Your Document (PDF, DOCX, PPTX, TXT)...", type=["pdf", "docx", "pptx", "txt"])
-
-# Text area for user question
-user_question = st.text_area("Type your question about the document content:")
 
 # Text input for page range
 page_range_input = st.text_input("Enter page ranges (e.g., 78-79):")
-
-# Initialize session state for history
-if 'history' not in st.session_state:
-    st.session_state.history = []
 
 # Submit button for processing the document
 submit = st.button("Submit")
@@ -119,7 +151,7 @@ submit = st.button("Submit")
 if submit:
     if uploaded_file:
         try:
-            # Extract text from the uploaded file
+            # Extract text
             if uploaded_file.type == "application/pdf":
                 document_text = input_pdf_text(uploaded_file)
             elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
@@ -141,100 +173,64 @@ if submit:
                         start, end = map(int, r.split('-'))
                         page_ranges.append(range(start - 1, end))
                 except ValueError:
-                    st.error("Invalid page range format! Use the format 'start-end'.")
+                    st.error("Invalid page range format! Use 'start-end'.")
                     st.stop()
             else:
                 page_ranges = [range(len(document_text))]
 
-            # Process selected pages
+            # Generate content
             generated_content = []
-            st.markdown("### Generated Content:")
-            
             for range_set in page_ranges:
                 for page_num in range_set:
                     if page_num < len(document_text):
-                        st.markdown(f"#### Page {page_num + 1}")
                         page_content = document_text[page_num]
-
-                        # Prepare prompt with extracted page text
                         input_prompt = input_prompts[subject]
                         input_prompt_filled = input_prompt.format(page_content=page_content)
-                        
-                        # Get response from Gemini API
                         response = get_gemini_response(input_prompt_filled)
                         
-                        # Display raw response for debugging
-                        st.markdown("**Raw Response:**")
-                        st.write(response)
-                        
                         try:
-                            # Parse response
                             response_json = json.loads(response)
-                            
-                            # Display and collect Explanation, Example, Mini Test, and Test Solution
-                            explanation = response_json.get("Explanation", "No explanation available.")
-                            example = response_json.get("Example", "No example available.")
-                            mini_test = response_json.get("Mini Test", "No mini test available.")
-                            test_solution = response_json.get("Test Solution", "No test solution available.")
-                            
-                            st.markdown("**Explanation:**")
-                            st.write(explanation)
-                            
-                            st.markdown("**Example:**")
-                            st.write(example)
-                            
-                            st.markdown("**Mini Test:**")
-                            st.write(mini_test)
-                            
-                            st.markdown("**Test Solution:**")
-                            st.write(test_solution)
-                            
-                            # Collect generated content in JSON format
                             page_content_json = {
                                 "Page": page_num + 1,
-                                "Explanation": explanation,
-                                "Example": example,
-                                "Mini Test": mini_test,
-                                "Test Solution": test_solution
+                                "Explanation": response_json.get("Explanation", "No explanation available."),
+                                "Example": response_json.get("Example", "No example available."),
+                                "Mini Test": response_json.get("Mini Test", "No mini test available."),
+                                "Test Solution": response_json.get("Test Solution", "No test solution available.")
                             }
                             generated_content.append(page_content_json)
                         except json.JSONDecodeError:
-                            st.error("Failed to decode JSON response from the model.")
-                        
+                            st.error("Failed to decode JSON response.")
                     else:
                         st.warning(f"Page {page_num + 1} is out of range.")
             
-            # Add generated content to history
-            st.session_state.history.append(generated_content)
+            st.success("Content generated successfully.")
             
-            # Provide option to copy generated content
-            st.markdown("### Copy Generated Content")
-            generated_content_str = json.dumps(generated_content, indent=4)
-            st.code(generated_content_str)
-            if st.button("Copy to Clipboard"):
-                st.experimental_set_query_params(text=generated_content_str)
-                st.success("Content copied to clipboard!")
+            # Allow download
+            docx_file = save_docx_with_formulas(generated_content)
+            st.download_button(
+                label="Download Generated Content",
+                data=docx_file,
+                file_name="generated_content.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
 
-            # Process user question
-            if user_question:
-                question_prompt = f"Based on the content of the document, answer the following question:\n{user_question}"
-                response = get_gemini_response(question_prompt)
-                st.markdown("### Answer to Your Question:")
-                st.write(response)
-                
         except Exception as e:
             st.error(f"Error: {str(e)}")
     else:
         st.warning("Please upload your document.")
 
-# Display history
-if st.session_state.history:
-    st.markdown("### History")
-    for i, content in enumerate(st.session_state.history, start=1):
-        with st.expander(f"History {i}"):
-            st.json(content)
-
-# Footer
-st.markdown("---")
-st.markdown("© 2024 by Christley")
+# Collapsible section for questions
+with st.expander("Ask a Question"):
+    st.subheader("Ask Questions about Your Document")
+    user_question = st.text_area("Type your question about the document content:")
+    submit_question = st.button("Submit Question")
+    
+    if submit_question:
+        if user_question:
+            question_prompt = f"Based on the content of the document, answer the following question:\n{user_question}"
+            response = get_gemini_response(question_prompt)
+            st.markdown("### Answer to Your Question:")
+            st.write(response)
+        else:
+            st.warning("Please type a question.")
 
